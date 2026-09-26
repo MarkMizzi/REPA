@@ -22,6 +22,7 @@ import numpy as np
 import PIL.Image
 import torch
 from tqdm import tqdm
+import itertools
 
 from encoders import StabilityVAEEncoder
 
@@ -392,21 +393,42 @@ def encode(
     if dest == '':
         raise click.ClickException('--dest output filename or directory must not be an empty string')
 
-    vae = StabilityVAEEncoder(vae_name=model_url, batch_size=1)
+    BATCH_SZ = 32
+
+    vae = StabilityVAEEncoder(vae_name=model_url, batch_size=BATCH_SZ)
     num_files, input_iter = open_dataset(source, max_images=max_images)
     archive_root_dir, save_bytes, close_dest = open_dest(dest)
     labels = []
 
-    for idx, image in tqdm(enumerate(input_iter), total=num_files):
-        img_tensor = torch.tensor(image.img).to('cuda').permute(2, 0, 1).unsqueeze(0)
-        mean_std = vae.encode_pixels(img_tensor)[0].cpu()
-        idx_str = f'{idx:08d}'
-        archive_fname = f'{idx_str[:5]}/img-mean-std-{idx_str}.npy'
+    def process_batch(batch):
+        indices, images = zip(*batch)
 
-        f = io.BytesIO()
-        np.save(f, mean_std)
-        save_bytes(os.path.join(archive_root_dir, archive_fname), f.getvalue())
-        labels.append([archive_fname, image.label] if image.label is not None else None)
+        img_tensor = torch.stack([
+            torch.tensor(image.img).permute(2, 0, 1)
+            for image in images
+        ]).to('cuda')
+
+        mean_std_batch = vae.encode_pixels(img_tensor)[0].cpu()
+
+        for idx, image, mean_std in zip(indices, images, mean_std_batch):
+            idx_str = f'{idx:08d}'
+            archive_fname = f'{idx_str[:5]}/img-mean-std-{idx_str}.npy'
+
+            f = io.BytesIO()
+            np.save(f, mean_std)
+            save_bytes(
+                os.path.join(archive_root_dir, archive_fname),
+                f.getvalue()
+            )
+
+            labels.append(
+                [archive_fname, image.label]
+            if image.label is not None
+            else None
+            )
+
+    for batch in itertools.batched(tqdm(enumerate(input_iter), total=num_files), 32):
+        process_batch(batch)
 
     metadata = {'labels': labels if all(x is not None for x in labels) else None}
     save_bytes(os.path.join(archive_root_dir, 'dataset.json'), json.dumps(metadata))
