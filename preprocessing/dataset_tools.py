@@ -408,7 +408,7 @@ def encode(
             for image in images
         ]).to('cuda')
 
-        mean_std_batch = vae.encode_pixels(img_tensor)[0].cpu()
+        mean_std_batch = vae.encode_pixels(img_tensor).cpu()
 
         for idx, image, mean_std in zip(indices, images, mean_std_batch):
             idx_str = f'{idx:08d}'
