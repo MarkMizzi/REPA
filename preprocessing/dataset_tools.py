@@ -393,7 +393,7 @@ def encode(
     if dest == '':
         raise click.ClickException('--dest output filename or directory must not be an empty string')
 
-    BATCH_SZ = 32
+    BATCH_SZ = 256
 
     vae = StabilityVAEEncoder(vae_name=model_url, batch_size=BATCH_SZ)
     num_files, input_iter = open_dataset(source, max_images=max_images)
@@ -423,11 +423,11 @@ def encode(
 
             labels.append(
                 [archive_fname, image.label]
-            if image.label is not None
-            else None
+                if image.label is not None
+                else None
             )
 
-    for batch in itertools.batched(tqdm(enumerate(input_iter), total=num_files), 32):
+    for batch in itertools.batched(tqdm(enumerate(input_iter), total=num_files), BATCH_SZ):
         process_batch(batch)
 
     metadata = {'labels': labels if all(x is not None for x in labels) else None}
